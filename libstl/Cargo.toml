@@ -1,0 +1,10 @@
+[package]
+name = "libstl"
+version = "0.1.0"
+authors = ["Terrence Cole <terrence.d.cole@gmail.com>"]
+
+[dependencies]
+byteorder = "^1.0"
+error-chain = "0.11"
+nalgebra = "0.11"
+nom = "^2.0"

@@ -31,7 +31,7 @@ use std::io::{Read, Write};
 use std::str;
 
 mod errors {
-    error_chain! {}
+    error_chain!{}
 }
 use errors::{Result, ResultExt};
 
@@ -42,12 +42,21 @@ pub struct Triangle {
     pub color: Option<[u8; 3]>, // 8-bit RGB format.
 }
 impl Triangle {
-    pub fn new(v0: Point3<f32>, v1: Point3<f32>, v2: Point3<f32>, norm: Point3<f32>) -> Self {
-        Triangle {
+    pub fn new(v0: Point3<f32>, v1: Point3<f32>, v2: Point3<f32>, norm: Point3<f32>, attr: u16) -> Self {
+        fn extract(attr: u16, shift: u8) -> u8 {
+            let bits = (attr & (0x1F << shift)) >> shift;
+            let expanded = (bits << 3) | (bits >> 2);
+            return expanded as u8;
+        }
+        let mut color = None;
+        if attr & (1 << 15) > 0 {
+            color = Some([extract(attr, 10), extract(attr, 5), extract(attr, 0)]);
+        }
+        return Triangle {
             verts: [v0, v1, v2],
             normal: norm,
-            color: None,
-        }
+            color
+        };
     }
 
     pub fn set_color(&mut self, r: u8, g: u8, b: u8) {
@@ -108,7 +117,7 @@ named!(get_ascii_triangle <&[u8], Triangle>, do_parse!(
             v2: get_vertex >>
         tag!("endloop") >> many1!(multispace) >>
     tag!("endfacet") >> many1!(multispace) >>
-    (Triangle::new(v0, v1, v2, norm))
+    (Triangle::new(v0, v1, v2, norm, 0))
 ));
 
 named!(parse_ascii_stl <&[u8], Mesh>, do_parse!(
@@ -127,7 +136,8 @@ named!(get_binary_triangle <&[u8], Triangle>, do_parse!(
             Point3::new(fs[3],  fs[4],  fs[5]),
             Point3::new(fs[6],  fs[7],  fs[8]),
             Point3::new(fs[9], fs[10], fs[11]),
-            Point3::new(fs[0],  fs[1],  fs[2])))
+            Point3::new(fs[0],  fs[1],  fs[2]),
+            attrs[0]))
 ));
 
 named!(parse_binary_stl <&[u8], Mesh>, do_parse!(
@@ -165,14 +175,14 @@ impl Mesh {
             match parse_ascii_stl(&s) {
                 nom::IResult::Error(e) => bail!("failed to parse ascii stl: {}", format!("{}", e)),
                 nom::IResult::Incomplete(_) => bail!("incomplete ascii stl"),
-                nom::IResult::Done(_, mesh) => return Ok(mesh)
+                nom::IResult::Done(_, mesh) => return Ok(mesh),
             };
         }
 
         match parse_binary_stl(&s) {
             nom::IResult::Error(e) => bail!("failed to parse binary stl: {}", format!("{}", e)),
             nom::IResult::Incomplete(_) => bail!("incomplete binary stl"),
-            nom::IResult::Done(_, mesh) => return Ok(mesh)
+            nom::IResult::Done(_, mesh) => return Ok(mesh),
         }
     }
 
@@ -278,27 +288,44 @@ impl Mesh {
 mod test {
     use super::*;
 
-    #[test]
-    fn test_read_scad() {
-        let mut fp = File::open("test_data/0color/cube_scad.stl").unwrap();
+    fn check_cube(name: &'static str) -> Mesh {
+        let mut fp = File::open(name).unwrap();
         let m = super::Mesh::from_file(&mut fp).unwrap();
         assert_eq!(m.tris.len(), 12);
-        assert_eq!(m.radius(), 3f32.sqrt());
+        assert!(m.radius() > 3f32.sqrt() - 0.001 && m.radius() < 3f32.sqrt() + 0.001);
+        return m;
     }
 
     #[test]
-    fn test_read_bin() {
-        let mut fp = File::open("test_data/0color/cube_bin.stl").unwrap();
-        let m = super::Mesh::from_file(&mut fp).unwrap();
-        assert_eq!(m.tris.len(), 12);
-        assert_eq!(m.radius(), 3f32.sqrt());
+    fn test_scad() {
+        check_cube("test_data/cube_scad.stl");
     }
 
     #[test]
-    fn test_read_text() {
-        let mut fp = File::open("test_data/0color/cube_text.stl").unwrap();
-        let m = super::Mesh::from_file(&mut fp).unwrap();
-        assert_eq!(m.tris.len(), 12);
-        assert_eq!(m.radius(), 3f32.sqrt());
+    fn test_meshlab_bin() {
+        check_cube("test_data/cube_meshlab_bin.stl");
+    }
+
+    #[test]
+    fn test_meshlab_text() {
+        check_cube("test_data/cube_meshlab_text.stl");
+    }
+
+    #[test]
+    fn test_blender_bin() {
+        check_cube("test_data/cube_blender_bin.stl");
+    }
+
+    #[test]
+    fn test_blender_text() {
+        check_cube("test_data/cube_blender_text.stl");
+    }
+
+    #[test]
+    fn test_meshlab_2color_bin() {
+        let m = check_cube("test_data/cube_meshlab_2color_bin.stl");
+        for t in m.tris {
+            assert!(t.color == Some([255, 0, 0]) || t.color == Some([0, 255, 0]));
+        }
     }
 }
